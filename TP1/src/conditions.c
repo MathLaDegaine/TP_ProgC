@@ -4,16 +4,23 @@ int main() {
     int somme = 0;
 
     for (int i = 1; i <= 1000; i++) {
-        if (i % 11 == 0)
+        // On ignore les multiples de 11
+        if (i % 11 == 0) {
             continue;
+        }
 
-        if (i % 5 == 0 || i % 7 == 0)
+        // On vérifie s’il est divisible par 5 ou 7
+        if (i % 5 == 0 || i % 7 == 0) {
+            // Vérification avant l'ajout
+            if (somme + i > 5000) {
+                break;
+            }
             somme += i;
-
-        if (somme > 5000)
-            break;
+            printf("Ajout de %d → somme = %d\n", i, somme);
+        }
     }
 
-    printf("Somme finale : %d\n", somme);
+    printf("\nSomme finale : %d\n", somme);
+
     return 0;
 }
