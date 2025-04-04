@@ -2,15 +2,16 @@
 
 int main() {
     int n = 7;
-    int a = 0, b = 1, c;
+    int a = 0, b = 1;
 
-    printf("%d, %d", a, b);
-    for (int i = 2; i <= n; i++) {
-        c = a + b;
-        printf(", %d", c);
-        a = b;
-        b = c;
+    for (int i = 0; i <= n; i++) {
+        printf("%d", a);
+        if (i != n) printf(", ");
+
+        b = a + b;
+        a = b - a;
     }
+
     printf("\n");
     return 0;
 }
