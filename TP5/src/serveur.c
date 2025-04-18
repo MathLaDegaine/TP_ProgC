@@ -16,102 +16,101 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <unistd.h>
+#include <ctype.h>
 
 #include "serveur.h"
 
-int socketfd; // Déclaration globale de socketfd
+int socketfd;
 
 /**
- * Cette fonction envoie un message (*data) au client (client_socket_fd)
- * @param client_socket_fd : Le descripteur de socket du client.
- * @param sdata : Le message à envoyer.
- * @return EXIT_SUCCESS en cas de succès, EXIT_FAILURE en cas d'erreur.
+ * Fonction pour évaluer une expression simple de type "a+b", "a-b", "a*b", "a/b"
  */
-int renvoie_message(int client_socket_fd, char *data)
-{
-  int data_size = write(client_socket_fd, (void *)data, strlen(data));
+int evaluer_expression(const char *expr, int *resultat) {
+  int a = 0, b = 0;
+  char op = 0;
+  if (sscanf(expr, "%d%c%d", &a, &op, &b) == 3) {
+    switch (op) {
+      case '+': *resultat = a + b; return 1;
+      case '-': *resultat = a - b; return 1;
+      case '*': *resultat = a * b; return 1;
+      case '/':
+        if (b == 0) return -1; // division par zéro
+        *resultat = a / b;
+        return 1;
+      default: return 0; // opérateur invalide
+    }
+  }
+  return 0; // format invalide
+}
 
-  if (data_size < 0)
-  {
+/**
+ * Envoie un message au client
+ */
+int renvoie_message(int client_socket_fd, char *data) {
+  int data_size = write(client_socket_fd, (void *)data, strlen(data));
+  if (data_size < 0) {
     perror("Erreur d'écriture");
     return EXIT_FAILURE;
+  }
+  return EXIT_SUCCESS;
+}
+
+/**
+ * Traite les messages du client et renvoie une réponse
+ */
+int recois_envoie_message(int client_socket_fd, char *data) {
+  printf("Message reçu: %s\n", data);
+  char code[10], contenu[1024];
+
+  if (sscanf(data, "%9[^:]:%1023[^\n]", code, contenu) == 2) {
+    if (strcmp(code, "message") == 0) {
+      int resultat = 0;
+      int status = evaluer_expression(contenu, &resultat);
+
+      char reponse[1024];
+      if (status == 1) {
+        snprintf(reponse, sizeof(reponse), "résultat: %d", resultat);
+      } else if (status == -1) {
+        snprintf(reponse, sizeof(reponse), "Erreur: division par zéro");
+      } else {
+        snprintf(reponse, sizeof(reponse), "Erreur: expression invalide");
+      }
+
+      return renvoie_message(client_socket_fd, reponse);
+    }
   }
 
   return EXIT_SUCCESS;
 }
 
 /**
- * Cette fonction lit les données envoyées par le client,
- * et renvoie un message en réponse.
- * @param socketfd : Le descripteur de socket du serveur.
- * @param data : Le message.
- * @return EXIT_SUCCESS en cas de succès, EXIT_FAILURE en cas d'erreur.
+ * Gère Ctrl+C (SIGINT)
  */
-int recois_envoie_message(int client_socket_fd, char *data)
-{
-  printf("Message reçu: %s\n", data);
-  char code[10];
-  if (sscanf(data, "%9s:", code) == 1) // Assurez-vous que le format est correct
-  {
-    if (strcmp(code, "message:") == 0)
-    {
-      return renvoie_message(client_socket_fd, data);
-    }
-  }
-
-  return (EXIT_SUCCESS);
-}
-
-/**
- * Gestionnaire de signal pour Ctrl+C (SIGINT).
- * @param signal : Le signal capturé (doit être SIGINT pour Ctrl+C).
- */
-void gestionnaire_ctrl_c(int signal)
-{
+void gestionnaire_ctrl_c(int signal) {
   printf("\nSignal Ctrl+C capturé. Sortie du programme.\n");
-
-  // Fermer le socket si ouvert
-  if (socketfd != -1)
-  {
+  if (socketfd != -1) {
     close(socketfd);
   }
-
-  exit(0); // Quitter proprement le programme.
+  exit(0);
 }
 
 /**
- * Gère la communication avec un client spécifique.
- *
- * @param client_socket_fd Le descripteur de socket du client à gérer.
+ * Communication avec un client
  */
-void gerer_client(int client_socket_fd)
-{
+void gerer_client(int client_socket_fd) {
   char data[1024];
-
-  while (1)
-  {
-    // Réinitialisation des données
+  while (1) {
     memset(data, 0, sizeof(data));
-
-    // Lecture des données envoyées par le client
     int data_size = read(client_socket_fd, data, sizeof(data));
 
-    if (data_size <= 0)
-    {
-      // Erreur de réception ou déconnexion du client
-      if (data_size == 0)
-      {
-        // Le client a fermé la connexion proprement
+    if (data_size <= 0) {
+      if (data_size == 0) {
         printf("Client déconnecté.\n");
-      }
-      else
-      {
+      } else {
         perror("Erreur de réception");
       }
-
-      // Fermer le socket du client et sortir de la boucle de communication
       close(client_socket_fd);
-      break; // Sortir de la boucle de communication avec ce client
+      break;
     }
 
     recois_envoie_message(client_socket_fd, data);
@@ -119,91 +118,61 @@ void gerer_client(int client_socket_fd)
 }
 
 /**
- * Configuration du serveur socket et attente de connexions.
+ * Point d'entrée principal
  */
+int main() {
+  int bind_status;
+  struct sockaddr_in server_addr;
+  int option = 1;
 
-int main()
-{
-
-  int bind_status;                // Statut de la liaison
-  struct sockaddr_in server_addr; // Structure pour l'adresse du serveur
-  int option = 1;                 // Option pour setsockopt
-
-  // Création d'une socket
   socketfd = socket(AF_INET, SOCK_STREAM, 0);
-
-  // Vérification si la création de la socket a réussi
-  if (socketfd < 0)
-  {
+  if (socketfd < 0) {
     perror("Impossible d'ouvrir une socket");
     return -1;
   }
 
-  // Configuration de l'option SO_REUSEADDR pour permettre la réutilisation de l'adresse du serveur
   setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
 
-  // Initialisation de la structure server_addr
   memset(&server_addr, 0, sizeof(server_addr));
   server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(PORT);       // Port d'écoute du serveur
-  server_addr.sin_addr.s_addr = INADDR_ANY; // Accepter les connexions de n'importe quelle adresse
+  server_addr.sin_port = htons(PORT);
+  server_addr.sin_addr.s_addr = inet_addr("10.0.30.5");
 
-  // Liaison de l'adresse à la socket
   bind_status = bind(socketfd, (struct sockaddr *)&server_addr, sizeof(server_addr));
-
-  // Vérification si la liaison a réussi
-  if (bind_status < 0)
-  {
+  if (bind_status < 0) {
     perror("bind");
-    return (EXIT_FAILURE);
+    return EXIT_FAILURE;
   }
 
-  // Enregistrement de la fonction de gestion du signal Ctrl+C
   signal(SIGINT, gestionnaire_ctrl_c);
 
-  // Mise en attente de la socket pour accepter les connexions entrantes jusqu'à une limite de 10 connexions en attente
   listen(socketfd, 10);
-
   printf("Serveur en attente de connexions...\n");
 
-  struct sockaddr_in client_addr;                     // Structure pour l'adresse du client
-  unsigned int client_addr_len = sizeof(client_addr); // Longueur de la structure client_addr
-  int client_socket_fd;                               // Descripteur de socket du client
+  struct sockaddr_in client_addr;
+  unsigned int client_addr_len = sizeof(client_addr);
+  int client_socket_fd;
 
-  // Boucle infinie
-  while (1)
-  {
-    // Nouvelle connexion cliente
+  while (1) {
     client_socket_fd = accept(socketfd, (struct sockaddr *)&client_addr, &client_addr_len);
-
-    if (client_socket_fd < 0)
-    {
+    if (client_socket_fd < 0) {
       perror("accept");
-      continue; // Continuer à attendre d'autres connexions en cas d'erreur
+      continue;
     }
 
-    // Créer un processus enfant pour gérer la communication avec le client
     pid_t child_pid = fork();
 
-    if (child_pid == 0)
-    {
-      // Code du processus enfant
-      close(socketfd); // Fermer la socket du serveur dans le processus enfant
+    if (child_pid == 0) {
+      close(socketfd);
       gerer_client(client_socket_fd);
-      exit(0); // Quitter le processus enfant
-    }
-    else if (child_pid < 0)
-    {
+      exit(0);
+    } else if (child_pid < 0) {
       perror("fork");
-      close(client_socket_fd); // Fermer le socket du client en cas d'erreur
-    }
-    else
-    {
-      // Code du processus parent
-      close(client_socket_fd); // Fermer le socket du client dans le processus parent
+      close(client_socket_fd);
+    } else {
+      close(client_socket_fd);
     }
   }
 
-  // Le programme ne devrait jamais atteindre cette ligne dans la boucle infinie
   return 0;
 }
